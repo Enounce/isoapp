@@ -107,7 +107,7 @@ def ors_headers():
     return {
         "Authorization": ORS_API_KEY,
         "Content-Type": "application/json",
-        "Accept": "application/json",
+        "Accept": "application/geo+json;charset=UTF-8",
     }
 
 def geocode_one(address: str) -> Dict[str, Any]:
@@ -313,5 +313,6 @@ def api_houses(payload: Dict[str, Any]):
             "fromA_minutes": None if a_sec is None else int(round(a_sec / 60)),
             "fromB_minutes": None if b_sec is None else int(round(b_sec / 60)),
         })
+
 
     return {"houses": out, "profile_name": profile}
