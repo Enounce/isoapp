@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 
 import requests
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
 # Optional dotenv for local dev
@@ -27,7 +27,7 @@ _last_storage = "none"
 _last_db_error: Optional[str] = None
 
 
-def _require_ors():
+def _require_ors() -> str:
     ors = (os.getenv("ORS_API_KEY") or "").strip()
     if not ors:
         raise HTTPException(
@@ -43,8 +43,6 @@ def _db_url_with_ssl(url: str) -> str:
     """
     if not url:
         return url
-
-    # Hvis der allerede er sslmode i query, behold den
     try:
         parsed = urlparse(url)
         q = dict(parse_qsl(parsed.query, keep_blank_values=True))
@@ -54,7 +52,6 @@ def _db_url_with_ssl(url: str) -> str:
             return urlunparse(parsed)
         return url
     except Exception:
-        # hvis parsing fejler, returnér original
         return url
 
 
@@ -62,6 +59,7 @@ def _get_pg_conn():
     """
     Returns a cached PostgreSQL connection if DATABASE_URL is set.
     Creates the app_state table if needed.
+    Uses psycopg (v3) which supports Python 3.13.
     """
     global _pg_conn, _last_storage, _last_db_error
 
@@ -74,11 +72,13 @@ def _get_pg_conn():
     db_url = _db_url_with_ssl(db_url)
 
     try:
-        if _pg_conn is None or getattr(_pg_conn, "closed", 1) != 0:
-            import psycopg2
+        import psycopg
+        from psycopg import sql
 
-            _pg_conn = psycopg2.connect(db_url, connect_timeout=10)
+        if _pg_conn is None or _pg_conn.closed:
+            _pg_conn = psycopg.connect(db_url, connect_timeout=10)
             _pg_conn.autocommit = True
+
             with _pg_conn.cursor() as cur:
                 cur.execute(
                     """
@@ -89,11 +89,12 @@ def _get_pg_conn():
                     );
                     """
                 )
+
         _last_storage = "postgres"
         _last_db_error = None
         return _pg_conn
+
     except Exception as e:
-        # Hvis DB fejler, falder vi tilbage til fil (men på Render er det ikke persistent)
         _last_storage = "file"
         _last_db_error = repr(e)
         return None
@@ -101,6 +102,7 @@ def _get_pg_conn():
 
 def _ensure_dict(x: Any) -> Dict[str, Any]:
     """
+    DB can return JSON as dict, but older rows may be stored as JSON string.
     Ensure we always return a dict.
     """
     if x is None:
@@ -117,9 +119,6 @@ def _ensure_dict(x: Any) -> Dict[str, Any]:
 
 
 def load_state() -> Dict[str, Any]:
-    """
-    Load state from Postgres (preferred) or fallback to a local JSON file.
-    """
     conn = _get_pg_conn()
     if conn:
         with conn.cursor() as cur:
@@ -127,7 +126,6 @@ def load_state() -> Dict[str, Any]:
             row = cur.fetchone()
             return _ensure_dict(row[0]) if row else {}
 
-    # Fallback file (local dev)
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -139,9 +137,6 @@ def load_state() -> Dict[str, Any]:
 
 
 def save_state(state: Dict[str, Any]) -> None:
-    """
-    Save state to Postgres (preferred) or fallback to a local JSON file.
-    """
     global _last_storage, _last_db_error
 
     if not isinstance(state, dict):
@@ -149,9 +144,10 @@ def save_state(state: Dict[str, Any]) -> None:
 
     conn = _get_pg_conn()
     if conn:
-        from psycopg2.extras import Json
-
         try:
+            import psycopg
+            from psycopg.types.json import Jsonb
+
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -161,7 +157,7 @@ def save_state(state: Dict[str, Any]) -> None:
                       SET data = EXCLUDED.data,
                           updated_at = NOW();
                     """,
-                    ("default", Json(state)),
+                    ("default", Jsonb(state)),
                 )
             _last_storage = "postgres"
             _last_db_error = None
@@ -170,7 +166,7 @@ def save_state(state: Dict[str, Any]) -> None:
             _last_storage = "file"
             _last_db_error = repr(e)
 
-    # fallback file
+    # fallback (local only)
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
@@ -181,9 +177,6 @@ def save_state(state: Dict[str, Any]) -> None:
 
 
 def clear_state() -> None:
-    """
-    Clear state in Postgres (preferred) or delete local JSON file.
-    """
     conn = _get_pg_conn()
     if conn:
         with conn.cursor() as cur:
@@ -201,11 +194,8 @@ def clear_state() -> None:
 # ORS helpers
 # -----------------------------
 def ors_headers():
-    """
-    Base headers shared across ORS endpoints.
-    NOTE: 'Accept' differs per endpoint, so it is set per request.
-    """
     ors = _require_ors()
+    # Accept sættes pr. endpoint (isochrones vs matrix)
     return {
         "Authorization": ors,
         "Content-Type": "application/json",
@@ -215,11 +205,7 @@ def ors_headers():
 def geocode_one(address: str) -> Dict[str, Any]:
     ors = _require_ors()
     url = "https://api.openrouteservice.org/geocode/search"
-    params = {
-        "api_key": ors,
-        "text": address,
-        "size": 1,
-    }
+    params = {"api_key": ors, "text": address, "size": 1}
     r = requests.get(url, params=params, timeout=20)
     if not r.ok:
         raise HTTPException(status_code=500, detail=f"ORS geocode fejl: {r.status_code} - {r.text}")
@@ -236,36 +222,19 @@ def geocode_one(address: str) -> Dict[str, Any]:
 def ors_autocomplete(q: str) -> List[Dict[str, Any]]:
     ors = _require_ors()
     url = "https://api.openrouteservice.org/geocode/autocomplete"
-    params = {
-        "api_key": ors,
-        "text": q,
-        "size": 10,
-    }
+    params = {"api_key": ors, "text": q, "size": 10}
     r = requests.get(url, params=params, timeout=20)
     if not r.ok:
         raise HTTPException(status_code=500, detail=f"ORS autocomplete fejl: {r.status_code} - {r.text}")
     data = r.json()
     feats = data.get("features") or []
-    out = []
-    for f in feats:
-        out.append(
-            {
-                "label": f["properties"].get("label"),
-                "lonlat": f["geometry"]["coordinates"],
-            }
-        )
-    return out
+    return [{"label": f["properties"].get("label"), "lonlat": f["geometry"]["coordinates"]} for f in feats]
 
 
 def ors_isochrone(lonlat: List[float], minutes: int, profile: str) -> Dict[str, Any]:
     secs = int(minutes) * 60
     url = f"https://api.openrouteservice.org/v2/isochrones/{profile}"
-    body = {
-        "locations": [lonlat],
-        "range": [secs],
-        "range_type": "time",
-        "smoothing": 0.6,
-    }
+    body = {"locations": [lonlat], "range": [secs], "range_type": "time", "smoothing": 0.6}
     r = requests.post(
         url,
         headers={**ors_headers(), "Accept": "application/geo+json;charset=UTF-8"},
@@ -279,7 +248,6 @@ def ors_isochrone(lonlat: List[float], minutes: int, profile: str) -> Dict[str, 
 
 def ors_matrix(from_lonlat: List[float], to_lonlats: List[List[float]], profile: str) -> List[Optional[int]]:
     url = f"https://api.openrouteservice.org/v2/matrix/{profile}"
-
     locations = [from_lonlat] + to_lonlats
     body = {
         "locations": locations,
@@ -299,10 +267,7 @@ def ors_matrix(from_lonlat: List[float], to_lonlats: List[List[float]], profile:
         raise HTTPException(status_code=500, detail=f"ORS matrix fejl: HTTP {r.status_code} - {r.text}")
     data = r.json()
     durations = (data.get("durations") or [[]])[0]
-    out: List[Optional[int]] = []
-    for d in durations:
-        out.append(None if d is None else int(round(d)))
-    return out
+    return [None if d is None else int(round(d)) for d in durations]
 
 
 # -----------------------------
@@ -317,7 +282,6 @@ def index():
 
 @app.get("/api/state")
 def api_get_state():
-    # Debug: fortæller hvor vi læser fra (postgres/file) og evt. db-fejl
     data = load_state()
     data["_debug"] = {
         "storage": _last_storage,
@@ -330,7 +294,6 @@ def api_get_state():
 @app.post("/api/state")
 def api_post_state(payload: Dict[str, Any]):
     save_state(payload or {})
-    # Returnér også debug så du kan se at den faktisk blev gemt i postgres
     return {
         "ok": True,
         "_debug": {
@@ -420,12 +383,7 @@ def api_houses(payload: Dict[str, Any]):
             continue
         g = geocode_one(addr)
         resolved.append(
-            {
-                "id": hid,
-                "address_input": addr,
-                "address_found": g["label"],
-                "lonlat": g["lonlat"],
-            }
+            {"id": hid, "address_input": addr, "address_found": g["label"], "lonlat": g["lonlat"]}
         )
         to_lonlats.append(g["lonlat"])
 
