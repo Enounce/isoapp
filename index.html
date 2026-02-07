@@ -171,7 +171,6 @@
       border: 2px solid rgba(255,255,255,0.95);
     }
     .ab-a { background: #2563eb; } /* blue */
-    /* B gets set dynamically to match the zone B outline color */
     .ab-b { background: #0a7a2f; } /* fallback; will be overridden in JS */
 
     .leaflet-popup-content { margin: 10px 12px; }
@@ -336,6 +335,15 @@
     // Map setup
     // --------------------------
     const map = L.map('map').setView([55.6761, 12.5683], 10);
+
+    // --- PANES: ensure houses pins are always above isochrones/overlap ---
+    // Default panes: tilePane(200), overlayPane(400), shadowPane(500), markerPane(600), tooltipPane(650), popupPane(700)
+    map.createPane('isoPane');
+    map.getPane('isoPane').style.zIndex = 350; // under overlay/markers
+
+    map.createPane('housesPane');
+    map.getPane('housesPane').style.zIndex = 650; // above markerPane
+
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
@@ -345,7 +353,8 @@
     let markerA = null;
     let markerB = null;
 
-    const housesLayer = L.layerGroup().addTo(map);
+    // Houses layer should be on housesPane so it stays on top
+    const housesLayer = L.layerGroup({ pane: 'housesPane' }).addTo(map);
     const houseMarkersById = new Map();
 
     let lastIso = null;
@@ -948,23 +957,21 @@
       if (markerA) map.removeLayer(markerA);
       if (markerB) map.removeLayer(markerB);
 
-      // Find outline colors from returned features (so B can match its zone)
       const zoneAColor = fc?.features?.[0]?.properties?.color || "#2563eb";
       const zoneBColor = fc?.features?.[1]?.properties?.color || "#0a7a2f";
 
-      // geoLayer will now be a group holding: zoneA, zoneB, and (if possible) overlap polygon
-      geoLayer = L.layerGroup().addTo(map);
+      // --- geoLayer on isoPane so it stays underneath houses pins ---
+      geoLayer = L.layerGroup({ pane: 'isoPane' }).addTo(map);
 
       const zoneA = fc.features?.[0] || null;
       const zoneB = fc.features?.[1] || null;
 
-      // Draw A and B with lower fill opacity
       if (zoneA) {
         const a = JSON.parse(JSON.stringify(zoneA));
         a.properties = a.properties || {};
         a.properties.fillOpacity = 0.08;
         a.properties.weight = 2;
-        L.geoJSON(a, { style: styleFromProps }).addTo(geoLayer);
+        L.geoJSON(a, { style: styleFromProps, pane: 'isoPane' }).addTo(geoLayer);
       }
 
       if (zoneB) {
@@ -972,10 +979,10 @@
         b.properties = b.properties || {};
         b.properties.fillOpacity = 0.08;
         b.properties.weight = 2;
-        L.geoJSON(b, { style: styleFromProps }).addTo(geoLayer);
+        L.geoJSON(b, { style: styleFromProps, pane: 'isoPane' }).addTo(geoLayer);
       }
 
-      // Draw overlap (intersection) as a strong highlight layer
+      // Overlap highlight (still on isoPane, but pins are on housesPane above it)
       try {
         if (zoneA && zoneB) {
           const inter = turf.intersect(zoneA, zoneB);
@@ -985,33 +992,24 @@
             inter.properties.fillOpacity = 0.32;
             inter.properties.weight = 2;
             inter.properties.dashArray = "6 6";
-
-            L.geoJSON(inter, { style: styleFromProps }).addTo(geoLayer);
+            L.geoJSON(inter, { style: styleFromProps, pane: 'isoPane' }).addTo(geoLayer);
           }
         }
-      } catch (e) {
-        // If intersection fails (rare geometry edge cases), ignore.
-      }
+      } catch (e) {}
 
-      const a = fc.meta.a;
-      const b = fc.meta.b;
+      const aMeta = fc.meta.a;
+      const bMeta = fc.meta.b;
 
-      markerA = L.marker([a.lonlat[1], a.lonlat[0]], { icon: makeABIcon("A", zoneAColor) }).addTo(map);
-      markerB = L.marker([b.lonlat[1], b.lonlat[0]], { icon: makeABIcon("B", zoneBColor) }).addTo(map);
+      markerA = L.marker([aMeta.lonlat[1], aMeta.lonlat[0]], { icon: makeABIcon("A", zoneAColor) }).addTo(map);
+      markerB = L.marker([bMeta.lonlat[1], bMeta.lonlat[0]], { icon: makeABIcon("B", zoneBColor) }).addTo(map);
 
-      const addr1Txt = document.getElementById("addr1").value.trim();
-      const addr2Txt = document.getElementById("addr2").value.trim();
+      markerA.bindPopup(`<b>Adresse A</b><br/>${shortAddr(document.getElementById("addr1").value.trim())}`);
+      markerB.bindPopup(`<b>Adresse B</b><br/>${shortAddr(document.getElementById("addr2").value.trim())}`);
 
-      markerA.bindPopup(`<b>Adresse A</b><br/>${shortAddr(addr1Txt)}`);
-      markerB.bindPopup(`<b>Adresse B</b><br/>${shortAddr(addr2Txt)}`);
-
-      // Fit bounds based on group layers
       try {
         const bounds = geoLayer.getBounds();
         if (bounds && bounds.isValid()) map.fitBounds(bounds.pad(0.15));
-      } catch {
-        // ignore
-      }
+      } catch {}
 
       setStatus("Områder opdateret.");
       return true;
@@ -1117,8 +1115,12 @@
           existingMarker.bindPopup(popup);
           existingMarker.off("click");
           existingMarker.on("click", () => existingMarker.openPopup());
+
+          // Ensure it stays on top of isochrones
+          existingMarker.bringToFront();
         } else {
           const circle = L.circleMarker([lat, lon], {
+            pane: 'housesPane',
             radius: 8,
             weight: 3,
             color: pinColor,
@@ -1126,6 +1128,8 @@
           }).addTo(housesLayer).bindPopup(popup);
 
           circle.on("click", () => circle.openPopup());
+          circle.bringToFront();
+
           houseMarkersById.set(id, circle);
         }
 
