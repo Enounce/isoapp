@@ -361,7 +361,13 @@
 
     function styleFromProps(feature) {
       const p = feature.properties || {};
-      return { color: p.color || 'black', weight: 2, fillOpacity: (p.fillOpacity ?? 0.15) };
+      const style = {
+        color: p.color || "black",
+        weight: p.weight ?? 2,
+        fillOpacity: (p.fillOpacity ?? 0.15)
+      };
+      if (p.dashArray) style.dashArray = p.dashArray;
+      return style;
     }
 
     function clearHousesPinsOnly() {
@@ -946,12 +952,46 @@
       const zoneAColor = fc?.features?.[0]?.properties?.color || "#2563eb";
       const zoneBColor = fc?.features?.[1]?.properties?.color || "#0a7a2f";
 
-      geoLayer = L.geoJSON(fc, {
-        style: (feature) => {
-          if (!feature.geometry) return { opacity: 0, fillOpacity: 0 };
-          return styleFromProps(feature);
+      // geoLayer will now be a group holding: zoneA, zoneB, and (if possible) overlap polygon
+      geoLayer = L.layerGroup().addTo(map);
+
+      const zoneA = fc.features?.[0] || null;
+      const zoneB = fc.features?.[1] || null;
+
+      // Draw A and B with lower fill opacity
+      if (zoneA) {
+        const a = JSON.parse(JSON.stringify(zoneA));
+        a.properties = a.properties || {};
+        a.properties.fillOpacity = 0.08;
+        a.properties.weight = 2;
+        L.geoJSON(a, { style: styleFromProps }).addTo(geoLayer);
+      }
+
+      if (zoneB) {
+        const b = JSON.parse(JSON.stringify(zoneB));
+        b.properties = b.properties || {};
+        b.properties.fillOpacity = 0.08;
+        b.properties.weight = 2;
+        L.geoJSON(b, { style: styleFromProps }).addTo(geoLayer);
+      }
+
+      // Draw overlap (intersection) as a strong highlight layer
+      try {
+        if (zoneA && zoneB) {
+          const inter = turf.intersect(zoneA, zoneB);
+          if (inter && inter.geometry) {
+            inter.properties = inter.properties || {};
+            inter.properties.color = "#111";
+            inter.properties.fillOpacity = 0.32;
+            inter.properties.weight = 2;
+            inter.properties.dashArray = "6 6";
+
+            L.geoJSON(inter, { style: styleFromProps }).addTo(geoLayer);
+          }
         }
-      }).addTo(map);
+      } catch (e) {
+        // If intersection fails (rare geometry edge cases), ignore.
+      }
 
       const a = fc.meta.a;
       const b = fc.meta.b;
@@ -965,8 +1005,13 @@
       markerA.bindPopup(`<b>Adresse A</b><br/>${shortAddr(addr1Txt)}`);
       markerB.bindPopup(`<b>Adresse B</b><br/>${shortAddr(addr2Txt)}`);
 
-      const bounds = geoLayer.getBounds();
-      if (bounds && bounds.isValid()) map.fitBounds(bounds.pad(0.15));
+      // Fit bounds based on group layers
+      try {
+        const bounds = geoLayer.getBounds();
+        if (bounds && bounds.isValid()) map.fitBounds(bounds.pad(0.15));
+      } catch {
+        // ignore
+      }
 
       setStatus("Områder opdateret.");
       return true;
@@ -1112,6 +1157,7 @@
       await restoreFromServer();
       isRestoring = false;
 
+      // Ensure server has at least current state
       saveServerState(getCurrentState()).catch(() => {});
 
       try {
