@@ -1,9 +1,10 @@
 import os
 import json
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import HTMLResponse
 
 # Optional dotenv for local dev
@@ -12,9 +13,6 @@ try:
     load_dotenv()
 except Exception:
     pass
-
-ORS_API_KEY = os.getenv("ORS_API_KEY", "").strip()
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "state.json")
@@ -25,6 +23,39 @@ app = FastAPI()
 # State storage: Postgres or file
 # -----------------------------
 _pg_conn = None
+_last_storage = "none"
+_last_db_error: Optional[str] = None
+
+
+def _require_ors():
+    ors = (os.getenv("ORS_API_KEY") or "").strip()
+    if not ors:
+        raise HTTPException(
+            status_code=500,
+            detail="ORS_API_KEY mangler. Sæt env var ORS_API_KEY før du starter serveren.",
+        )
+    return ors
+
+
+def _db_url_with_ssl(url: str) -> str:
+    """
+    Render Postgres kræver ofte SSL. Hvis sslmode ikke findes, tilføj sslmode=require.
+    """
+    if not url:
+        return url
+
+    # Hvis der allerede er sslmode i query, behold den
+    try:
+        parsed = urlparse(url)
+        q = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        if "sslmode" not in q:
+            q["sslmode"] = "require"
+            parsed = parsed._replace(query=urlencode(q))
+            return urlunparse(parsed)
+        return url
+    except Exception:
+        # hvis parsing fejler, returnér original
+        return url
 
 
 def _get_pg_conn():
@@ -32,31 +63,44 @@ def _get_pg_conn():
     Returns a cached PostgreSQL connection if DATABASE_URL is set.
     Creates the app_state table if needed.
     """
-    global _pg_conn
-    if not DATABASE_URL:
+    global _pg_conn, _last_storage, _last_db_error
+
+    db_url = (os.getenv("DATABASE_URL") or "").strip()
+    if not db_url:
+        _last_storage = "file"
+        _last_db_error = "DATABASE_URL not set"
         return None
 
-    if _pg_conn is None or getattr(_pg_conn, "closed", 1) != 0:
-        import psycopg2
+    db_url = _db_url_with_ssl(db_url)
 
-        _pg_conn = psycopg2.connect(DATABASE_URL)
-        _pg_conn.autocommit = True
-        with _pg_conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS app_state (
-                    id TEXT PRIMARY KEY,
-                    data JSONB NOT NULL,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-                """
-            )
-    return _pg_conn
+    try:
+        if _pg_conn is None or getattr(_pg_conn, "closed", 1) != 0:
+            import psycopg2
+
+            _pg_conn = psycopg2.connect(db_url, connect_timeout=10)
+            _pg_conn.autocommit = True
+            with _pg_conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS app_state (
+                        id TEXT PRIMARY KEY,
+                        data JSONB NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    """
+                )
+        _last_storage = "postgres"
+        _last_db_error = None
+        return _pg_conn
+    except Exception as e:
+        # Hvis DB fejler, falder vi tilbage til fil (men på Render er det ikke persistent)
+        _last_storage = "file"
+        _last_db_error = repr(e)
+        return None
 
 
 def _ensure_dict(x: Any) -> Dict[str, Any]:
     """
-    DB can return JSONB as dict, but older rows may be stored as a JSON string.
     Ensure we always return a dict.
     """
     if x is None:
@@ -98,29 +142,42 @@ def save_state(state: Dict[str, Any]) -> None:
     """
     Save state to Postgres (preferred) or fallback to a local JSON file.
     """
+    global _last_storage, _last_db_error
+
     if not isinstance(state, dict):
         state = {}
 
     conn = _get_pg_conn()
     if conn:
-        # IMPORTANT: store as real JSONB, not a string
         from psycopg2.extras import Json
 
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO app_state (id, data)
-                VALUES (%s, %s)
-                ON CONFLICT (id) DO UPDATE
-                  SET data = EXCLUDED.data,
-                      updated_at = NOW();
-                """,
-                ("default", Json(state)),
-            )
-        return
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO app_state (id, data)
+                    VALUES (%s, %s)
+                    ON CONFLICT (id) DO UPDATE
+                      SET data = EXCLUDED.data,
+                          updated_at = NOW();
+                    """,
+                    ("default", Json(state)),
+                )
+            _last_storage = "postgres"
+            _last_db_error = None
+            return
+        except Exception as e:
+            _last_storage = "file"
+            _last_db_error = repr(e)
 
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+    # fallback file
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+        _last_storage = "file"
+    except Exception as e:
+        _last_storage = "none"
+        _last_db_error = repr(e)
 
 
 def clear_state() -> None:
@@ -143,30 +200,23 @@ def clear_state() -> None:
 # -----------------------------
 # ORS helpers
 # -----------------------------
-def _require_ors():
-    if not ORS_API_KEY:
-        raise HTTPException(
-            status_code=500,
-            detail="ORS_API_KEY mangler. Sæt env var ORS_API_KEY før du starter serveren.",
-        )
-
-
 def ors_headers():
     """
     Base headers shared across ORS endpoints.
     NOTE: 'Accept' differs per endpoint, so it is set per request.
     """
+    ors = _require_ors()
     return {
-        "Authorization": ORS_API_KEY,
+        "Authorization": ors,
         "Content-Type": "application/json",
     }
 
 
 def geocode_one(address: str) -> Dict[str, Any]:
-    _require_ors()
+    ors = _require_ors()
     url = "https://api.openrouteservice.org/geocode/search"
     params = {
-        "api_key": ORS_API_KEY,
+        "api_key": ors,
         "text": address,
         "size": 1,
     }
@@ -184,10 +234,10 @@ def geocode_one(address: str) -> Dict[str, Any]:
 
 
 def ors_autocomplete(q: str) -> List[Dict[str, Any]]:
-    _require_ors()
+    ors = _require_ors()
     url = "https://api.openrouteservice.org/geocode/autocomplete"
     params = {
-        "api_key": ORS_API_KEY,
+        "api_key": ors,
         "text": q,
         "size": 10,
     }
@@ -208,7 +258,6 @@ def ors_autocomplete(q: str) -> List[Dict[str, Any]]:
 
 
 def ors_isochrone(lonlat: List[float], minutes: int, profile: str) -> Dict[str, Any]:
-    _require_ors()
     secs = int(minutes) * 60
     url = f"https://api.openrouteservice.org/v2/isochrones/{profile}"
     body = {
@@ -229,7 +278,6 @@ def ors_isochrone(lonlat: List[float], minutes: int, profile: str) -> Dict[str, 
 
 
 def ors_matrix(from_lonlat: List[float], to_lonlats: List[List[float]], profile: str) -> List[Optional[int]]:
-    _require_ors()
     url = f"https://api.openrouteservice.org/v2/matrix/{profile}"
 
     locations = [from_lonlat] + to_lonlats
@@ -269,13 +317,28 @@ def index():
 
 @app.get("/api/state")
 def api_get_state():
-    return load_state()
+    # Debug: fortæller hvor vi læser fra (postgres/file) og evt. db-fejl
+    data = load_state()
+    data["_debug"] = {
+        "storage": _last_storage,
+        "db_error": _last_db_error,
+        "has_DATABASE_URL": bool((os.getenv("DATABASE_URL") or "").strip()),
+    }
+    return data
 
 
 @app.post("/api/state")
 def api_post_state(payload: Dict[str, Any]):
     save_state(payload or {})
-    return {"ok": True}
+    # Returnér også debug så du kan se at den faktisk blev gemt i postgres
+    return {
+        "ok": True,
+        "_debug": {
+            "storage": _last_storage,
+            "db_error": _last_db_error,
+            "has_DATABASE_URL": bool((os.getenv("DATABASE_URL") or "").strip()),
+        },
+    }
 
 
 @app.delete("/api/state")
@@ -312,14 +375,14 @@ def api_overlap(payload: Dict[str, Any]):
     if iso1.get("features"):
         f = iso1["features"][0]
         f.setdefault("properties", {})
-        f["properties"]["color"] = "#2563eb"  # blue outline for A
+        f["properties"]["color"] = "#2563eb"  # A
         f["properties"]["fillOpacity"] = 0.10
         features.append(f)
 
     if iso2.get("features"):
         f = iso2["features"][0]
         f.setdefault("properties", {})
-        f["properties"]["color"] = "#0a7a2f"  # green outline for B
+        f["properties"]["color"] = "#0a7a2f"  # B
         f["properties"]["fillOpacity"] = 0.10
         features.append(f)
 
