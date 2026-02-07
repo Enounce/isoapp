@@ -54,6 +54,24 @@ def _get_pg_conn():
     return _pg_conn
 
 
+def _ensure_dict(x: Any) -> Dict[str, Any]:
+    """
+    DB can return JSONB as dict, but older rows may be stored as a JSON string.
+    Ensure we always return a dict.
+    """
+    if x is None:
+        return {}
+    if isinstance(x, dict):
+        return x
+    if isinstance(x, str):
+        try:
+            v = json.loads(x)
+            return v if isinstance(v, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
 def load_state() -> Dict[str, Any]:
     """
     Load state from Postgres (preferred) or fallback to a local JSON file.
@@ -63,12 +81,14 @@ def load_state() -> Dict[str, Any]:
         with conn.cursor() as cur:
             cur.execute("SELECT data FROM app_state WHERE id=%s", ("default",))
             row = cur.fetchone()
-            return row[0] if row else {}
+            return _ensure_dict(row[0]) if row else {}
 
+    # Fallback file (local dev)
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f) or {}
+                data = json.load(f) or {}
+                return data if isinstance(data, dict) else {}
         except Exception:
             return {}
     return {}
@@ -78,8 +98,14 @@ def save_state(state: Dict[str, Any]) -> None:
     """
     Save state to Postgres (preferred) or fallback to a local JSON file.
     """
+    if not isinstance(state, dict):
+        state = {}
+
     conn = _get_pg_conn()
     if conn:
+        # IMPORTANT: store as real JSONB, not a string
+        from psycopg2.extras import Json
+
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -89,7 +115,7 @@ def save_state(state: Dict[str, Any]) -> None:
                   SET data = EXCLUDED.data,
                       updated_at = NOW();
                 """,
-                ("default", json.dumps(state)),
+                ("default", Json(state)),
             )
         return
 
