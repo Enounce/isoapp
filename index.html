@@ -1,0 +1,1126 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Boligområde overlap</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <style>
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    .wrap { display: grid; grid-template-columns: 410px 1fr; height: 100vh; }
+    .panel { padding: 14px; border-right: 1px solid #ddd; overflow-y: auto; }
+    #map { height: 100vh; }
+
+    label { display:block; font-weight: 700; margin-top: 10px; }
+    input[type="text"], select {
+      width: 100%;
+      padding: 10px;
+      box-sizing: border-box;
+      margin-top: 6px;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      background: white;
+    }
+
+    .row { display:flex; gap: 10px; align-items:center; margin-top: 10px; }
+    input[type="range"] { width: 100%; }
+    button { padding: 10px 12px; cursor: pointer; border-radius: 10px; border: 1px solid #ccc; background: #fff; }
+    button.primary { border-color: #111; }
+    .status { margin-top: 10px; font-size: 14px; color: #333; }
+    .error { color: #b00020; }
+    .muted { color: #666; font-size: 13px; margin-top: 10px; line-height: 1.4; }
+    .hint { font-size: 12px; color: #777; margin-top: 6px; }
+
+    /* Autocomplete */
+    .autocomplete-wrap { position: relative; }
+    .autocomplete-list {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: calc(100% + 4px);
+      z-index: 2000;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .autocomplete-item {
+      padding: 9px 10px;
+      cursor: pointer;
+      font-size: 14px;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+    .autocomplete-item:last-child { border-bottom: none; }
+    .autocomplete-item:hover,
+    .autocomplete-item.active { background: #f3f4f6; }
+
+    .badge {
+      font-size: 11px;
+      color: #666;
+      border: 1px solid #ddd;
+      padding: 1px 6px;
+      border-radius: 999px;
+      flex: 0 0 auto;
+    }
+
+    /* Houses UI */
+    .section-title { margin: 14px 0 6px 0; font-size: 16px; font-weight: 800; }
+    .house-row { border: 1px solid #eee; border-radius: 12px; padding: 10px; margin-top: 10px; }
+    .house-header { display:flex; align-items:center; justify-content: space-between; gap: 10px; }
+    .plus-btn {
+      width: 38px;
+      height: 38px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      border-radius: 10px;
+      font-size: 20px;
+      font-weight: 800;
+      user-select: none;
+    }
+    .house-row-top { display:flex; gap: 10px; align-items: center; }
+    .house-row-top .autocomplete-wrap { flex: 1; }
+
+    .icon-btn {
+      width: 38px;
+      height: 38px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      border-radius: 10px;
+      font-size: 18px;
+      font-weight: 800;
+      user-select: none;
+      border: 1px solid #ccc;
+      background: #fff;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .icon-btn.danger { border-color: rgba(176,0,32,0.35); color: #b00020; }
+    .icon-btn.edit { border-color: rgba(17,17,17,0.25); color: #111; }
+
+    .house-times { margin-top: 6px; font-size: 12px; color: #777; display:flex; gap: 10px; flex-wrap: wrap; }
+    .tag { padding: 2px 8px; border-radius: 999px; border: 1px solid #ddd; background: #fff; }
+    .ok { color: #0a7a2f; border-color: rgba(10,122,47,0.25); }
+    .bad { color: #b00020; border-color: rgba(176,0,32,0.25); }
+    .na { color: #666; }
+
+    /* Link fields (image + boliglink + pris) */
+    .house-links { margin-top: 8px; display:flex; flex-direction: column; gap: 8px; }
+    .house-links input[type="url"], .house-links input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      box-sizing: border-box;
+      margin-top: 0;
+    }
+
+    /* Thumbnail + price overlay */
+    .thumb-wrap { position: relative; }
+    .price-badge {
+      position: absolute;
+      left: 10px;
+      top: 10px;
+      background: rgba(0,0,0,0.75);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+      padding: 6px 10px;
+      border-radius: 999px;
+      display: none;
+      max-width: calc(100% - 20px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .thumb {
+      margin-top: 8px;
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid #eee;
+      display: none;
+    }
+
+    .thumb-link { display:none; }
+    .thumb-link.show { display:block; }
+
+    .popup-address a { text-decoration: underline; }
+
+    /* A/B marker labels */
+    .ab-icon { background: transparent; border: none; }
+    .ab-badge {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      font-size: 14px;
+      color: #fff;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+      border: 2px solid rgba(255,255,255,0.95);
+    }
+    .ab-a { background: #2563eb; } /* blue */
+    /* B gets set dynamically to match the zone B outline color */
+    .ab-b { background: #0a7a2f; } /* fallback; will be overridden in JS */
+
+    .leaflet-popup-content { margin: 10px 12px; }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h2 style="margin:0 0 10px 0;">Afstand til 2 adresser</h2>
+
+      <label>Adresse A</label>
+      <div class="autocomplete-wrap">
+        <input id="addr1" type="text" placeholder="Begynd at skrive… (min. 3 tegn)" autocomplete="off" />
+        <div id="auto1"></div>
+      </div>
+
+      <label>Adresse B</label>
+      <div class="autocomplete-wrap">
+        <input id="addr2" type="text" placeholder="Begynd at skrive… (min. 3 tegn)" autocomplete="off" />
+        <div id="auto2"></div>
+      </div>
+
+      <div class="hint">Tip: Du får også forslag fra dine tidligere adresser.</div>
+
+      <label>Transportmiddel</label>
+      <select id="profile">
+        <option value="driving-car" selected>Bil</option>
+        <option value="cycling-regular">Cykel</option>
+        <option value="foot-walking">Gang</option>
+      </select>
+
+      <label>Tid (minutter): <span id="minLabel">60</span></label>
+      <div class="row">
+        <input id="minutes" type="range" min="5" max="60" step="5" value="60" />
+      </div>
+
+      <div class="row">
+        <button id="go" class="primary">Beregn områder</button>
+        <button id="clearAll">Ryd alt</button>
+      </div>
+
+      <div id="status" class="status muted">
+        Indtast A og B, vælg transportmiddel og tryk “Beregn områder”.
+      </div>
+
+      <div class="muted">
+        Bemærk: ORS-isokroner er begrænset til max 60 min på din nøgle.
+      </div>
+
+      <hr style="margin:14px 0; border: none; border-top: 1px solid #eee;" />
+
+      <div class="house-header">
+        <div class="section-title">Boliger</div>
+        <button id="addHouseRow" class="plus-btn" title="Tilføj en bolig">+</button>
+      </div>
+
+      <div id="housesContainer"></div>
+
+      <div class="row">
+        <button id="updateHouses">Opdatér bolig-pins</button>
+        <button id="clearHouses">Ryd bolig-pins</button>
+      </div>
+    </div>
+
+    <div id="map"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+  <script>
+    // --------------------------
+    // Server-side persistence
+    // --------------------------
+    let isRestoring = true;
+
+    async function loadServerState() {
+      const r = await fetch("/api/state", { method: "GET" });
+      if (!r.ok) return {};
+      const data = await r.json().catch(() => ({}));
+      return (data && typeof data === "object") ? data : {};
+    }
+
+    async function saveServerState(state) {
+      await fetch("/api/state", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(state)
+      });
+    }
+
+    async function clearServerState() {
+      await fetch("/api/state", { method: "DELETE" });
+    }
+
+    function debounce(fn, delayMs) {
+      let t = null;
+      return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(() => fn(...args), delayMs);
+      };
+    }
+
+    const saveStateDebounced = debounce(() => {
+      if (isRestoring) return;
+      saveServerState(getCurrentState()).catch(() => {});
+    }, 200);
+
+    // --------------------------
+    // "Gemte adresser" (server-side i state)
+    // --------------------------
+    let savedAddresses = [];
+
+    function saveAddress(addr) {
+      const s = (addr || "").trim();
+      if (!s) return;
+
+      const lower = s.toLowerCase();
+      savedAddresses = savedAddresses.filter(x => (x || "").toLowerCase() !== lower);
+      savedAddresses.unshift(s);
+      savedAddresses = savedAddresses.slice(0, 60);
+
+      saveStateDebounced();
+    }
+
+    function deleteSavedAddress(addr) {
+      const s = (addr || "").trim().toLowerCase();
+      if (!s) return;
+      savedAddresses = savedAddresses.filter(x => (x || "").toLowerCase() !== s);
+      saveStateDebounced();
+    }
+
+    function getUsedAddressesLower() {
+      const vals = new Set();
+
+      const a = document.getElementById("addr1")?.value?.trim();
+      const b = document.getElementById("addr2")?.value?.trim();
+      if (a) vals.add(a.toLowerCase());
+      if (b) vals.add(b.toLowerCase());
+
+      document.querySelectorAll(".house-row input[type='text']").forEach(inp => {
+        const v = (inp.value || "").trim();
+        if (v) vals.add(v.toLowerCase());
+      });
+
+      return vals;
+    }
+
+    function getSavedMatches(query, limit = 6) {
+      const q = (query || "").trim().toLowerCase();
+      const used = getUsedAddressesLower();
+
+      const pool = (Array.isArray(savedAddresses) ? savedAddresses : [])
+        .filter(a => !used.has((a || "").toLowerCase()));
+
+      if (!q) return pool.slice(0, limit);
+      return pool.filter(a => a.toLowerCase().includes(q)).slice(0, limit);
+    }
+
+    // --------------------------
+    // Map setup
+    // --------------------------
+    const map = L.map('map').setView([55.6761, 12.5683], 10);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    let geoLayer = null;
+    let markerA = null;
+    let markerB = null;
+
+    const housesLayer = L.layerGroup().addTo(map);
+    const houseMarkersById = new Map();
+
+    let lastIso = null;
+
+    const statusEl = document.getElementById('status');
+    const minutesEl = document.getElementById('minutes');
+    const minLabel = document.getElementById('minLabel');
+
+    function setStatus(msg, isError=false) {
+      statusEl.textContent = msg;
+      statusEl.className = 'status ' + (isError ? 'error' : 'muted');
+    }
+
+    function styleFromProps(feature) {
+      const p = feature.properties || {};
+      return { color: p.color || 'black', weight: 2, fillOpacity: (p.fillOpacity ?? 0.15) };
+    }
+
+    function clearHousesPinsOnly() {
+      housesLayer.clearLayers();
+      houseMarkersById.clear();
+    }
+
+    function clearAll() {
+      if (geoLayer) { map.removeLayer(geoLayer); geoLayer = null; }
+      if (markerA) { map.removeLayer(markerA); markerA = null; }
+      if (markerB) { map.removeLayer(markerB); markerB = null; }
+      clearHousesPinsOnly();
+      lastIso = null;
+
+      housesContainer.innerHTML = "";
+      addHouseRow();
+
+      document.getElementById("addr1").value = "";
+      document.getElementById("addr2").value = "";
+      document.getElementById("profile").value = "driving-car";
+      document.getElementById("minutes").value = "60";
+      minLabel.textContent = "60";
+
+      savedAddresses = [];
+
+      clearServerState().catch(() => {});
+      setStatus("Ryddet.");
+    }
+
+    function clearHousesPins() {
+      clearHousesPinsOnly();
+      setStatus("Bolig-pins ryddet (inddata beholdt).");
+    }
+
+    minutesEl.addEventListener('input', () => {
+      minLabel.textContent = minutesEl.value;
+      saveStateDebounced();
+    });
+
+    document.getElementById('clearAll').addEventListener('click', clearAll);
+    document.getElementById('clearHouses').addEventListener('click', clearHousesPins);
+
+    // --------------------------
+    // Autocomplete (ORS + Saved)
+    // --------------------------
+    async function fetchORS(q) {
+      const res = await fetch(`/api/autocomplete?q=${encodeURIComponent(q)}`);
+      const items = await res.json();
+      return (Array.isArray(items) ? items : []).map(x => ({ label: x.label, source: "ORS" }));
+    }
+
+    function mergeSavedAndORS(savedStrings, orsItems) {
+      const seen = new Set();
+      const out = [];
+
+      for (const s of savedStrings) {
+        const key = s.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push({ label: s, source: "Gemte" });
+        }
+      }
+
+      for (const o of orsItems) {
+        const key = (o.label || "").toLowerCase();
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          out.push({ label: o.label, source: "ORS" });
+        }
+      }
+
+      return out.slice(0, 10);
+    }
+
+    function setupAutocomplete(inputEl, boxEl) {
+      let currentItems = [];
+      let activeIndex = -1;
+
+      function closeList() {
+        boxEl.innerHTML = "";
+        currentItems = [];
+        activeIndex = -1;
+      }
+
+      function updateActive(listEl) {
+        const children = listEl.querySelectorAll(".autocomplete-item");
+        children.forEach((c, i) => c.classList.toggle("active", i === activeIndex));
+      }
+
+      function choose(idx) {
+        const item = currentItems[idx];
+        if (!item) return;
+        inputEl.value = item.label;
+        closeList();
+        saveAddress(item.label);
+        saveStateDebounced();
+      }
+
+      function renderList(items) {
+        closeList();
+        if (!items || items.length === 0) return;
+
+        const list = document.createElement("div");
+        list.className = "autocomplete-list";
+
+        items.forEach((item, idx) => {
+          const div = document.createElement("div");
+          div.className = "autocomplete-item";
+
+          const left = document.createElement("div");
+          left.textContent = item.label;
+
+          const right = document.createElement("div");
+          right.style.display = "flex";
+          right.style.gap = "8px";
+          right.style.alignItems = "center";
+
+          if (item.source) {
+            const badge = document.createElement("span");
+            badge.className = "badge";
+            badge.textContent = item.source;
+            right.appendChild(badge);
+          }
+
+          if (item.source === "Gemte") {
+            const del = document.createElement("span");
+            del.className = "badge";
+            del.textContent = "✕";
+            del.title = "Slet gemt adresse";
+            del.style.cursor = "pointer";
+            del.style.userSelect = "none";
+
+            del.addEventListener("mousedown", (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            });
+            del.addEventListener("click", (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              deleteSavedAddress(item.label);
+
+              const q = inputEl.value.trim();
+              const savedStrings = getSavedMatches(q, 10);
+              if (q.length >= 3) {
+                fetchORS(q)
+                  .then(ors => renderList(mergeSavedAndORS(savedStrings, ors)))
+                  .catch(() => renderList(savedStrings.map(s => ({ label: s, source: "Gemte" }))));
+              } else {
+                renderList(savedStrings.map(s => ({ label: s, source: "Gemte" })));
+              }
+            });
+
+            right.appendChild(del);
+          }
+
+          div.appendChild(left);
+          div.appendChild(right);
+
+          div.addEventListener("mouseenter", () => {
+            activeIndex = idx;
+            updateActive(list);
+          });
+
+          div.addEventListener("mousedown", (e) => {
+            e.preventDefault();
+            choose(idx);
+          });
+
+          list.appendChild(div);
+        });
+
+        boxEl.appendChild(list);
+        currentItems = items;
+        activeIndex = -1;
+      }
+
+      const fetchAndShow = debounce(async () => {
+        const q = inputEl.value.trim();
+        const savedStrings = getSavedMatches(q, 10);
+        const savedItems = savedStrings.map(s => ({ label: s, source: "Gemte" }));
+
+        if (q.length < 3) {
+          renderList(savedItems);
+          return;
+        }
+
+        try {
+          const ors = await fetchORS(q);
+          renderList(mergeSavedAndORS(savedStrings, ors));
+        } catch {
+          renderList(savedItems);
+        }
+      }, 220);
+
+      inputEl.addEventListener("input", () => { fetchAndShow(); saveStateDebounced(); });
+
+      inputEl.addEventListener("focus", () => {
+        const q = inputEl.value.trim();
+        const savedStrings = getSavedMatches(q, 10);
+        renderList(savedStrings.map(s => ({ label: s, source: "Gemte" })));
+      });
+
+      inputEl.addEventListener("blur", () => {
+        setTimeout(() => {
+          const val = inputEl.value.trim();
+          if (val) saveAddress(val);
+          saveStateDebounced();
+        }, 150);
+      });
+
+      inputEl.addEventListener("keydown", (e) => {
+        const listEl = boxEl.querySelector(".autocomplete-list");
+        if (!listEl) return;
+
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          activeIndex = Math.min(activeIndex + 1, currentItems.length - 1);
+          updateActive(listEl);
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          activeIndex = Math.max(activeIndex - 1, 0);
+          updateActive(listEl);
+        } else if (e.key === "Enter") {
+          if (activeIndex >= 0) {
+            e.preventDefault();
+            choose(activeIndex);
+          }
+        } else if (e.key === "Escape") {
+          closeList();
+        }
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!boxEl.contains(e.target) && e.target !== inputEl) closeList();
+      });
+    }
+
+    setupAutocomplete(document.getElementById("addr1"), document.getElementById("auto1"));
+    setupAutocomplete(document.getElementById("addr2"), document.getElementById("auto2"));
+
+    document.getElementById("profile").addEventListener("change", saveStateDebounced);
+    document.getElementById("addr1").addEventListener("input", saveStateDebounced);
+    document.getElementById("addr2").addEventListener("input", saveStateDebounced);
+
+    function pointInPolygon(lon, lat, featurePoly) {
+      if (!featurePoly || !featurePoly.geometry) return false;
+      const pt = turf.point([lon, lat]);
+      return turf.booleanPointInPolygon(pt, featurePoly);
+    }
+
+    function timeTag(label, minutesVal, limitMinutes) {
+      if (minutesVal == null) return `<span class="tag na">${label}: —</span>`;
+      const cls = (minutesVal <= limitMinutes) ? "ok" : "bad";
+      return `<span class="tag ${cls}">${label}: ${minutesVal} min</span>`;
+    }
+
+    // --------------------------
+    // A/B marker icons (B color from zone-B outline)
+    // --------------------------
+    function makeABIcon(letter, bgColor) {
+      const fallback = (letter === "A") ? "#2563eb" : "#0a7a2f";
+      const color = bgColor || fallback;
+      return L.divIcon({
+        className: "ab-icon",
+        html: `<div class="ab-badge" style="background:${color}">${letter}</div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+        popupAnchor: [0, -14]
+      });
+    }
+
+    function shortAddr(s) {
+      const t = (s || "").trim();
+      if (!t) return "";
+      return t.length > 70 ? (t.slice(0, 67) + "…") : t;
+    }
+
+    // --------------------------
+    // Houses UI (unikke IDs + redigeringsknap + pris)
+    // --------------------------
+    const housesContainer = document.getElementById("housesContainer");
+
+    function existingHouseIdSet() {
+      return new Set(Array.from(document.querySelectorAll(".house-row")).map(r => r.dataset.houseId).filter(Boolean));
+    }
+
+    function makeUniqueHouseId() {
+      const existing = existingHouseIdSet();
+
+      if (window.crypto && typeof crypto.randomUUID === "function") {
+        let id = crypto.randomUUID();
+        while (existing.has(id)) id = crypto.randomUUID();
+        return id;
+      }
+
+      let id = `h_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      while (existing.has(id)) {
+        id = `h_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      }
+      return id;
+    }
+
+    function normalizeUrl(u) {
+      const s = (u || "").trim();
+      if (!s) return "";
+      try { return new URL(s).toString(); } catch { return s; }
+    }
+
+    function normalizePrice(p) {
+      const s = (p || "").trim();
+      if (!s) return "";
+      return s;
+    }
+
+    function syncHouseLinksUI(rowEl) {
+      const id = rowEl.dataset.houseId;
+
+      const addrInput = rowEl.querySelector(`#house_${id}`);
+      const imgInput = rowEl.querySelector(`#img_${id}`);
+      const linkInput = rowEl.querySelector(`#link_${id}`);
+      const priceInput = rowEl.querySelector(`#price_${id}`);
+
+      const linksBox = rowEl.querySelector(`[data-links-box="${id}"]`);
+
+      const thumbImg = rowEl.querySelector(`#thumb_${id}`);
+      const thumbA = rowEl.querySelector(`#thumblink_${id}`);
+      const priceBadge = rowEl.querySelector(`#pricebadge_${id}`);
+
+      const imgUrl = normalizeUrl(imgInput?.value);
+      const listingUrl = normalizeUrl(linkInput?.value);
+      const price = normalizePrice(priceInput?.value);
+
+      rowEl.dataset.imageUrl = imgUrl;
+      rowEl.dataset.listingUrl = listingUrl;
+      rowEl.dataset.price = price;
+
+      if (imgUrl) {
+        thumbImg.src = imgUrl;
+        thumbImg.style.display = "block";
+      } else {
+        thumbImg.src = "";
+        thumbImg.style.display = "none";
+      }
+
+      thumbA.href = listingUrl || "#";
+      thumbA.classList.toggle("show", !!imgUrl);
+
+      if (imgUrl && price) {
+        priceBadge.textContent = price;
+        priceBadge.style.display = "inline-block";
+      } else {
+        priceBadge.textContent = "";
+        priceBadge.style.display = "none";
+      }
+
+      const isEditing = rowEl.dataset.editing === "1";
+      const locked = (imgUrl && listingUrl) && !isEditing;
+
+      if (locked) {
+        linksBox.style.display = "none";
+        imgInput.disabled = true;
+        linkInput.disabled = true;
+        priceInput.disabled = true;
+        addrInput.disabled = true;
+      } else {
+        linksBox.style.display = "";
+        imgInput.disabled = false;
+        linkInput.disabled = false;
+        priceInput.disabled = false;
+        addrInput.disabled = false;
+      }
+
+      saveStateDebounced();
+    }
+
+    function setRowEditMode(rowEl, editMode) {
+      const id = rowEl.dataset.houseId;
+      const addrInput = rowEl.querySelector(`#house_${id}`);
+      const imgInput  = rowEl.querySelector(`#img_${id}`);
+      const linkInput = rowEl.querySelector(`#link_${id}`);
+      const priceInput = rowEl.querySelector(`#price_${id}`);
+      const linksBox  = rowEl.querySelector(`[data-links-box="${id}"]`);
+      const editBtn   = rowEl.querySelector(`[data-edit-btn="${id}"]`);
+
+      rowEl.dataset.editing = editMode ? "1" : "0";
+
+      if (editMode) {
+        linksBox.style.display = "";
+        addrInput.disabled = false;
+        imgInput.disabled = false;
+        linkInput.disabled = false;
+        priceInput.disabled = false;
+
+        editBtn.textContent = "✓";
+        editBtn.title = "Gem";
+      } else {
+        syncHouseLinksUI(rowEl);
+        editBtn.textContent = "✎";
+        editBtn.title = "Redigér";
+      }
+
+      saveStateDebounced();
+    }
+
+    function removeHouseRow(rowEl) {
+      const id = rowEl.dataset.houseId;
+      const marker = houseMarkersById.get(id);
+      if (marker) {
+        housesLayer.removeLayer(marker);
+        houseMarkersById.delete(id);
+      }
+      rowEl.remove();
+      saveStateDebounced();
+      setStatus("Bolig fjernet.");
+    }
+
+    function addHouseRow(address = "", listingUrl = "", imageUrl = "", price = "", desiredId = null) {
+      const existing = existingHouseIdSet();
+      const id = (desiredId && !existing.has(desiredId)) ? desiredId : makeUniqueHouseId();
+
+      const row = document.createElement("div");
+      row.className = "house-row";
+      row.dataset.houseId = id;
+      row.dataset.imageUrl = "";
+      row.dataset.listingUrl = "";
+      row.dataset.price = "";
+      row.dataset.editing = "0";
+
+      row.innerHTML = `
+        <div class="house-row-top">
+          <div class="autocomplete-wrap">
+            <input type="text" id="house_${id}" placeholder="Boligadresse (min. 3 tegn)" autocomplete="off" />
+            <div id="auto_${id}"></div>
+          </div>
+
+          <button class="icon-btn edit" data-edit-btn="${id}" title="Redigér" aria-label="Redigér">✎</button>
+          <button class="icon-btn danger" title="Fjern denne bolig" aria-label="Fjern">✕</button>
+        </div>
+
+        <div class="house-links" data-links-box="${id}">
+          <input type="url" id="link_${id}" placeholder="Boliglink (valgfrit)" autocomplete="off" />
+          <input type="url" id="img_${id}" placeholder="Billedlink (valgfrit)" autocomplete="off" />
+          <input type="text" id="price_${id}" placeholder="Salgspris (valgfrit) fx 2.995.000 kr." autocomplete="off" />
+        </div>
+
+        <a class="thumb-link" id="thumblink_${id}" target="_blank" rel="noopener noreferrer">
+          <div class="thumb-wrap">
+            <div class="price-badge" id="pricebadge_${id}"></div>
+            <img class="thumb" id="thumb_${id}" alt="Bolig-billede" />
+          </div>
+        </a>
+
+        <div class="house-times" data-house-times="${id}">
+          <span class="tag na">A: —</span>
+          <span class="tag na">B: —</span>
+        </div>
+      `;
+
+      housesContainer.appendChild(row);
+
+      const addrInput = row.querySelector(`#house_${id}`);
+      const boxEl = row.querySelector(`#auto_${id}`);
+      addrInput.value = address || "";
+      setupAutocomplete(addrInput, boxEl);
+
+      const imgInput = row.querySelector(`#img_${id}`);
+      const linkInput = row.querySelector(`#link_${id}`);
+      const priceInput = row.querySelector(`#price_${id}`);
+
+      imgInput.value = imageUrl || "";
+      linkInput.value = listingUrl || "";
+      priceInput.value = price || "";
+
+      const onAnyChanged = () => syncHouseLinksUI(row);
+      imgInput.addEventListener("input", onAnyChanged);
+      imgInput.addEventListener("blur", onAnyChanged);
+      linkInput.addEventListener("input", onAnyChanged);
+      linkInput.addEventListener("blur", onAnyChanged);
+      priceInput.addEventListener("input", onAnyChanged);
+      priceInput.addEventListener("blur", onAnyChanged);
+
+      addrInput.addEventListener("input", saveStateDebounced);
+
+      row.querySelector(".icon-btn.danger").addEventListener("click", () => removeHouseRow(row));
+
+      const editBtn = row.querySelector(`[data-edit-btn="${id}"]`);
+      editBtn.addEventListener("click", () => {
+        const editing = row.dataset.editing === "1";
+        setRowEditMode(row, !editing);
+      });
+
+      const lockedInitially = (normalizeUrl(linkInput.value) && normalizeUrl(imgInput.value));
+      setRowEditMode(row, !lockedInitially);
+      syncHouseLinksUI(row);
+
+      return row;
+    }
+
+    document.getElementById("addHouseRow").addEventListener("click", () => {
+      addHouseRow();
+      saveStateDebounced();
+    });
+
+    // --------------------------
+    // State <-> UI
+    // --------------------------
+    function getCurrentState() {
+      const addr1 = document.getElementById("addr1").value || "";
+      const addr2 = document.getElementById("addr2").value || "";
+      const profile = document.getElementById("profile").value || "driving-car";
+      const minutes = parseInt(document.getElementById("minutes").value || "60", 10);
+
+      const houses = Array.from(document.querySelectorAll(".house-row")).map(row => {
+        const id = row.dataset.houseId;
+        const address = row.querySelector(`#house_${id}`)?.value || "";
+        const listingUrl = row.querySelector(`#link_${id}`)?.value || "";
+        const imageUrl = row.querySelector(`#img_${id}`)?.value || "";
+        const price = row.querySelector(`#price_${id}`)?.value || "";
+        return { id, address, listingUrl, imageUrl, price };
+      });
+
+      return {
+        addr1, addr2, profile, minutes,
+        houses,
+        savedAddresses: Array.isArray(savedAddresses) ? savedAddresses : []
+      };
+    }
+
+    async function restoreFromServer() {
+      const s = await loadServerState();
+
+      savedAddresses = Array.isArray(s.savedAddresses) ? s.savedAddresses : [];
+
+      document.getElementById("addr1").value = s.addr1 || "";
+      document.getElementById("addr2").value = s.addr2 || "";
+      document.getElementById("profile").value = s.profile || "driving-car";
+      document.getElementById("minutes").value = String(s.minutes ?? 60);
+      minLabel.textContent = String(s.minutes ?? 60);
+
+      housesContainer.innerHTML = "";
+
+      const hs = Array.isArray(s.houses) ? s.houses : [];
+      if (hs.length === 0) {
+        addHouseRow();
+      } else {
+        hs.forEach(h => addHouseRow(h.address || "", h.listingUrl || "", h.imageUrl || "", h.price || "", h.id || null));
+      }
+    }
+
+    // --------------------------
+    // Auto runners (for load + buttons)
+    // --------------------------
+    async function runOverlap() {
+      const address1 = document.getElementById('addr1').value.trim();
+      const address2 = document.getElementById('addr2').value.trim();
+      const minutes = parseInt(minutesEl.value, 10);
+      const profile = document.getElementById('profile').value;
+
+      if (!address1 || !address2) return false;
+
+      setStatus("Beregner områder…");
+      const res = await fetch('/api/overlap', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ address1, address2, minutes, profile })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setStatus(err.detail || `Serverfejl (${res.status})`, true);
+        return false;
+      }
+
+      const fc = await res.json();
+      lastIso = fc;
+
+      if (geoLayer) map.removeLayer(geoLayer);
+      if (markerA) map.removeLayer(markerA);
+      if (markerB) map.removeLayer(markerB);
+
+      // Find outline colors from returned features (so B can match its zone)
+      const zoneAColor = fc?.features?.[0]?.properties?.color || "#2563eb";
+      const zoneBColor = fc?.features?.[1]?.properties?.color || "#0a7a2f";
+
+      geoLayer = L.geoJSON(fc, {
+        style: (feature) => {
+          if (!feature.geometry) return { opacity: 0, fillOpacity: 0 };
+          return styleFromProps(feature);
+        }
+      }).addTo(map);
+
+      const a = fc.meta.a;
+      const b = fc.meta.b;
+
+      markerA = L.marker([a.lonlat[1], a.lonlat[0]], { icon: makeABIcon("A", zoneAColor) }).addTo(map);
+      markerB = L.marker([b.lonlat[1], b.lonlat[0]], { icon: makeABIcon("B", zoneBColor) }).addTo(map);
+
+      const addr1Txt = document.getElementById("addr1").value.trim();
+      const addr2Txt = document.getElementById("addr2").value.trim();
+
+      markerA.bindPopup(`<b>Adresse A</b><br/>${shortAddr(addr1Txt)}`);
+      markerB.bindPopup(`<b>Adresse B</b><br/>${shortAddr(addr2Txt)}`);
+
+      const bounds = geoLayer.getBounds();
+      if (bounds && bounds.isValid()) map.fitBounds(bounds.pad(0.15));
+
+      setStatus("Områder opdateret.");
+      return true;
+    }
+
+    async function runUpdateHouses() {
+      if (!lastIso) return;
+
+      const minutesLimit = parseInt(minutesEl.value, 10);
+      const profile = document.getElementById('profile').value;
+
+      const rows = Array.from(document.querySelectorAll(".house-row"));
+      const houses = rows.map(r => {
+        const id = r.dataset.houseId;
+        const addr = r.querySelector(`input[type="text"]`).value.trim();
+        return { id, address: addr };
+      }).filter(h => h.address.length > 0);
+
+      if (houses.length === 0) return;
+
+      rows.forEach(r => syncHouseLinksUI(r));
+
+      setStatus("Opdaterer boliger…");
+      const res = await fetch('/api/houses', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          houses,
+          a_lonlat: lastIso.meta.a.lonlat,
+          b_lonlat: lastIso.meta.b.lonlat,
+          profile
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setStatus(err.detail || `Serverfejl (${res.status})`, true);
+        return;
+      }
+
+      const data = await res.json();
+      const out = data.houses || [];
+      const zones = (lastIso && lastIso.features && lastIso.features.length >= 2)
+        ? { zoneA: lastIso.features[0], zoneB: lastIso.features[1] }
+        : null;
+
+      out.forEach(h => {
+        const id = h.id;
+        const lon = h.lonlat[0];
+        const lat = h.lonlat[1];
+
+        const inA = zones ? pointInPolygon(lon, lat, zones.zoneA) : false;
+        const inB = zones ? pointInPolygon(lon, lat, zones.zoneB) : false;
+        const inOverlap = inA && inB;
+
+        const pinColor = inOverlap ? "green" : "red";
+
+        const aMin = h.fromA_minutes;
+        const bMin = h.fromB_minutes;
+
+        const rowEl = document.querySelector(`.house-row[data-house-id="${id}"]`);
+        const listingUrl = rowEl ? (rowEl.dataset.listingUrl || "").trim() : "";
+        const imgUrl = rowEl ? (rowEl.dataset.imageUrl || "").trim() : "";
+        const price = rowEl ? (rowEl.dataset.price || "").trim() : "";
+
+        const safeAddr = (h.address_found || h.address_input || "").trim();
+
+        const addressHtml = listingUrl
+          ? `<span class="popup-address"><a href="${listingUrl}" target="_blank" rel="noopener noreferrer">${safeAddr}</a></span>`
+          : `<span class="popup-address">${safeAddr}</span>`;
+
+        const priceHtml = price
+          ? `<div style="margin-top:6px; font-weight:800;">${price}</div>`
+          : "";
+
+        const imgHtml = (imgUrl && listingUrl)
+          ? `<div style="margin-top:8px;">
+               <a href="${listingUrl}" target="_blank" rel="noopener noreferrer">
+                 <img src="${imgUrl}" style="width:100%;max-width:320px;border-radius:10px;border:1px solid #eee;" alt="Bolig-billede" />
+               </a>
+             </div>`
+          : (imgUrl
+              ? `<div style="margin-top:8px;">
+                   <img src="${imgUrl}" style="width:100%;max-width:320px;border-radius:10px;border:1px solid #eee;" alt="Bolig-billede" />
+                 </div>`
+              : "");
+
+        const popup = `
+          <b>Bolig</b><br/>
+          ${addressHtml}
+          ${priceHtml}
+          <hr/>
+          <b>Status:</b> ${inOverlap ? "Indenfor overlap" : "Udenfor overlap"}<br/>
+          <b>${data.profile_name} fra A:</b> ${aMin == null ? "—" : aMin + " min"}<br/>
+          <b>${data.profile_name} fra B:</b> ${bMin == null ? "—" : bMin + " min"}<br/>
+          ${imgHtml}
+        `;
+
+        const existingMarker = houseMarkersById.get(id);
+        if (existingMarker) {
+          existingMarker.setStyle({ color: pinColor });
+          existingMarker.setLatLng([lat, lon]);
+          existingMarker.bindPopup(popup);
+          existingMarker.off("click");
+          existingMarker.on("click", () => existingMarker.openPopup());
+        } else {
+          const circle = L.circleMarker([lat, lon], {
+            radius: 8,
+            weight: 3,
+            color: pinColor,
+            fillOpacity: 0.9
+          }).addTo(housesLayer).bindPopup(popup);
+
+          circle.on("click", () => circle.openPopup());
+          houseMarkersById.set(id, circle);
+        }
+
+        const timesEl = document.querySelector(`[data-house-times="${id}"]`);
+        if (timesEl) {
+          timesEl.innerHTML = timeTag("A", aMin, minutesLimit) + timeTag("B", bMin, minutesLimit);
+        }
+      });
+
+      setStatus("Boliger opdateret.");
+    }
+
+    // --------------------------
+    // Button handlers use runners
+    // --------------------------
+    document.getElementById('go').addEventListener('click', async () => {
+      try { await runOverlap(); } catch (e) { setStatus(e.message || "Noget gik galt.", true); }
+    });
+
+    document.getElementById("updateHouses").addEventListener("click", async () => {
+      try { await runUpdateHouses(); } catch (e) { setStatus(e.message || "Noget gik galt.", true); }
+    });
+
+    // --------------------------
+    // Init: restore + auto draw
+    // --------------------------
+    (async function init() {
+      isRestoring = true;
+      await restoreFromServer();
+      isRestoring = false;
+
+      saveServerState(getCurrentState()).catch(() => {});
+
+      try {
+        const ok = await runOverlap();
+        if (ok) await runUpdateHouses();
+      } catch (e) {
+        setStatus(e.message || "Kunne ikke genskabe kort ved indlæsning.", true);
+      }
+    })();
+  </script>
+</body>
+</html>
