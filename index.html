@@ -3,15 +3,28 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Boligområde overlap</title>
 
-  <!-- Favicon: J & K (SVG data-URI) -->
-  <!-- NOTE: Browsere kan cache favicon hårdt. Hvis du lige har ændret det, så prøv Ctrl+F5 / Incognito. -->
-  <link rel="icon" type="image/svg+xml"
-    href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2064%2064%27%3E%3Crect%20width%3D%2764%27%20height%3D%2764%27%20rx%3D%2714%27%20fill%3D%27%23111%27/%3E%3Ctext%20x%3D%2732%27%20y%3D%2741%27%20text-anchor%3D%27middle%27%20font-size%3D%2728%27%20font-weight%3D%27700%27%20font-family%3D%27Arial%2CHelvetica%2Csans-serif%27%20fill%3D%27%23fff%27%3EJ%20%26%20K%3C/text%3E%3C/svg%3E" />
-  <!-- Fallback til ældre browsers -->
-  <link rel="alternate icon"
-    href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2064%2064%27%3E%3Crect%20width%3D%2764%27%20height%3D%2764%27%20rx%3D%2714%27%20fill%3D%27%23111%27/%3E%3Ctext%20x%3D%2732%27%20y%3D%2741%27%20text-anchor%3D%27middle%27%20font-size%3D%2728%27%20font-weight%3D%27700%27%20font-family%3D%27Arial%2CHelvetica%2Csans-serif%27%20fill%3D%27%23fff%27%3EJ%20%26%20K%3C/text%3E%3C/svg%3E" />
+  <!-- ✅ App navn + meta -->
+  <title>Bolig Sweet Spot – find boliger i fælles rækkevidde</title>
+
+  <meta name="description" content="Bolig Sweet Spot hjælper par med at finde boliger i fælles rækkevidde fra to adresser. Se overlappende områder, køretider og boliger samlet på ét kort.">
+  <meta name="keywords" content="boligkøb, pendlerbolig, fælles rækkevidde, bolig sweet spot, køretid, boligkort, par og bolig, boligsøgning">
+  <meta name="author" content="Bolig Sweet Spot">
+
+  <!-- Open Graph (deling) -->
+  <meta property="og:title" content="Bolig Sweet Spot – find boliger i fælles rækkevidde">
+  <meta property="og:description" content="Find boliger, der ligger i den fælles rækkevidde mellem to adresser. Perfekt til par, der vil bo smart – ikke i midten af ingenting.">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="da_DK">
+
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Bolig Sweet Spot">
+  <meta name="twitter:description" content="Find boliger i fælles rækkevidde fra to adresser – visualiseret på kort med køretider.">
+
+  <!-- ✅ Favicon: 🎯 -->
+  <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='0.9em' font-size='32'>🎯</text></svg>">
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
@@ -186,7 +199,9 @@
 <body>
   <div class="wrap">
     <div class="panel">
-      <h2 style="margin:0 0 10px 0;">Afstand til 2 adresser</h2>
+      <!-- ✅ Titel i UI -->
+      <h2 style="margin:0 0 4px 0;">🎯 Bolig Sweet Spot</h2>
+      <div class="muted" style="margin-top:0;">find boliger i fælles rækkevidde</div>
 
       <label>Adresse A</label>
       <div class="autocomplete-wrap">
@@ -343,7 +358,6 @@
     const map = L.map('map').setView([55.6761, 12.5683], 10);
 
     // PANES: ensure houses pins are always above isochrones/overlap
-    // Default panes: tilePane(200), overlayPane(400), shadowPane(500), markerPane(600), tooltipPane(650), popupPane(700)
     map.createPane('isoPane');
     map.getPane('isoPane').style.zIndex = 350;
 
@@ -660,13 +674,12 @@
     }
 
     // --- Address cleanup for Google Maps link ---
-    // You identified ", SL, Denmark" as the trouble-maker.
-    // We remove that (and a few safe variants) from the URL query, while keeping the full address as link text.
+    // We remove problematic suffixes (e.g. ", SL, Denmark") from the URL query,
+    // while keeping full address as link text.
     function cleanForMapsQuery(address) {
       let s = (address || "").trim();
       if (!s) return s;
 
-      // normalize spacing around commas
       s = s.replace(/\s*,\s*/g, ", ");
 
       const patterns = [
@@ -677,7 +690,6 @@
       ];
       for (const p of patterns) s = s.replace(p, "");
 
-      // also remove trailing ", Denmark"/", Danmark" if present (often helps)
       s = s.replace(/,?\s*Denmark\s*$/i, "");
       s = s.replace(/,?\s*Danmark\s*$/i, "");
 
@@ -756,7 +768,6 @@
         thumbImg.style.display = "none";
       }
 
-      // Menu thumbnail click -> listingUrl (if present)
       thumbA.href = listingUrl || "#";
       thumbA.classList.toggle("show", !!imgUrl);
 
@@ -1112,7 +1123,6 @@
 
         const safeAddr = (h.address_found || h.address_input || "").trim();
 
-        // Address link: Google Maps search, BUT with cleaned query (no ", SL, Denmark" etc.)
         const gmaps = googleMapsSearchUrlFromAddressText(safeAddr);
         const addressHtml = `<span class="popup-address"><a href="${gmaps}" target="_blank" rel="noopener noreferrer">${safeAddr}</a></span>`;
 
@@ -1120,7 +1130,6 @@
           ? `<div style="margin-top:6px; font-weight:800;">${price}</div>`
           : "";
 
-        // Image clickable to listingUrl (if present)
         const imgHtml = (imgUrl && listingUrl)
           ? `<div style="margin-top:8px;">
                <a href="${listingUrl}" target="_blank" rel="noopener noreferrer">
