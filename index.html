@@ -245,7 +245,8 @@
       <hr style="margin:14px 0; border: none; border-top: 1px solid #eee;" />
 
       <div class="house-header">
-        <div class="section-title">Boliger</div>
+        <!-- ✅ Boliger (antal) -->
+        <div class="section-title" id="housesTitle">Boliger (0)</div>
         <button id="addHouseRow" class="plus-btn" title="Tilføj en bolig">+</button>
       </div>
 
@@ -412,6 +413,7 @@
 
       housesContainer.innerHTML = "";
       addHouseRow();
+      updateHousesTitle(); // ✅
 
       document.getElementById("addr1").value = "";
       document.getElementById("addr2").value = "";
@@ -646,10 +648,12 @@
       return turf.booleanPointInPolygon(pt, featurePoly);
     }
 
+    // ✅ Keep boblerne som de er: kun prefix på A-tag
     function timeTag(label, minutesVal, limitMinutes) {
-      if (minutesVal == null) return `<span class="tag na">${label}: —</span>`;
+      const prefix = (label === "A") ? "Køretid: " : "";
+      if (minutesVal == null) return `<span class="tag na">${prefix}${label}: —</span>`;
       const cls = (minutesVal <= limitMinutes) ? "ok" : "bad";
-      return `<span class="tag ${cls}">${label}: ${minutesVal} min</span>`;
+      return `<span class="tag ${cls}">${prefix}${label}: ${minutesVal} min</span>`;
     }
 
     // --------------------------
@@ -705,6 +709,13 @@
     // Houses UI (unikke IDs + redigeringsknap + pris)
     // --------------------------
     const housesContainer = document.getElementById("housesContainer");
+    const housesTitleEl = document.getElementById("housesTitle");
+
+    // ✅ Update "Boliger (n)"
+    function updateHousesTitle() {
+      const count = document.querySelectorAll(".house-row").length;
+      housesTitleEl.textContent = `Boliger (${count})`;
+    }
 
     function existingHouseIdSet() {
       return new Set(Array.from(document.querySelectorAll(".house-row")).map(r => r.dataset.houseId).filter(Boolean));
@@ -836,6 +847,7 @@
         houseMarkersById.delete(id);
       }
       rowEl.remove();
+      updateHousesTitle(); // ✅
       saveStateDebounced();
       setStatus("Bolig fjernet.");
     }
@@ -877,12 +889,13 @@
         </a>
 
         <div class="house-times" data-house-times="${id}">
-          <span class="tag na">A: —</span>
+          <span class="tag na">Køretid: A: —</span>
           <span class="tag na">B: —</span>
         </div>
       `;
 
       housesContainer.appendChild(row);
+      updateHousesTitle(); // ✅
 
       const addrInput = row.querySelector(`#house_${id}`);
       const boxEl = row.querySelector(`#auto_${id}`);
@@ -971,6 +984,8 @@
       } else {
         hs.forEach(h => addHouseRow(h.address || "", h.listingUrl || "", h.imageUrl || "", h.price || "", h.id || null));
       }
+
+      updateHousesTitle(); // ✅
     }
 
     // --------------------------
@@ -1028,7 +1043,6 @@
         L.geoJSON(b, { style: styleFromProps, pane: 'isoPane' }).addTo(geoLayer);
       }
 
-      // overlap highlight
       try {
         if (zoneA && zoneB) {
           const inter = turf.intersect(zoneA, zoneB);
@@ -1213,6 +1227,9 @@
         setStatus(e.message || "Kunne ikke genskabe kort ved indlæsning.", true);
       }
     })();
+
+    // Ensure title correct on initial render even before restore completes
+    updateHousesTitle();
   </script>
 </body>
 </html>
