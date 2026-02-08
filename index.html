@@ -128,7 +128,21 @@
     .icon-btn.danger { border-color: rgba(176,0,32,0.35); color: #b00020; }
     .icon-btn.edit { border-color: rgba(17,17,17,0.25); color: #111; }
 
-    .house-times { margin-top: 6px; font-size: 12px; color: #777; display:flex; gap: 10px; flex-wrap: wrap; }
+    /* ✅ Køretid-label uden for boblerne */
+    .house-times {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #777;
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .house-times .label {
+      font-weight: 700;
+      color: #666;
+    }
+
     .tag { padding: 2px 8px; border-radius: 999px; border: 1px solid #ddd; background: #fff; }
     .ok { color: #0a7a2f; border-color: rgba(10,122,47,0.25); }
     .bad { color: #b00020; border-color: rgba(176,0,32,0.25); }
@@ -245,7 +259,7 @@
       <hr style="margin:14px 0; border: none; border-top: 1px solid #eee;" />
 
       <div class="house-header">
-        <!-- ✅ Boliger (antal) -->
+        <!-- ✅ Boliger + antal -->
         <div class="section-title" id="housesTitle">Boliger (0)</div>
         <button id="addHouseRow" class="plus-btn" title="Tilføj en bolig">+</button>
       </div>
@@ -413,7 +427,6 @@
 
       housesContainer.innerHTML = "";
       addHouseRow();
-      updateHousesTitle(); // ✅
 
       document.getElementById("addr1").value = "";
       document.getElementById("addr2").value = "";
@@ -425,6 +438,8 @@
 
       clearServerState().catch(() => {});
       setStatus("Ryddet.");
+
+      updateHousesTitle();
     }
 
     function clearHousesPins() {
@@ -648,12 +663,10 @@
       return turf.booleanPointInPolygon(pt, featurePoly);
     }
 
-    // ✅ Keep boblerne som de er: kun prefix på A-tag
     function timeTag(label, minutesVal, limitMinutes) {
-      const prefix = (label === "A") ? "Køretid: " : "";
-      if (minutesVal == null) return `<span class="tag na">${prefix}${label}: —</span>`;
+      if (minutesVal == null) return `<span class="tag na">${label}: —</span>`;
       const cls = (minutesVal <= limitMinutes) ? "ok" : "bad";
-      return `<span class="tag ${cls}">${prefix}${label}: ${minutesVal} min</span>`;
+      return `<span class="tag ${cls}">${label}: ${minutesVal} min</span>`;
     }
 
     // --------------------------
@@ -711,7 +724,6 @@
     const housesContainer = document.getElementById("housesContainer");
     const housesTitleEl = document.getElementById("housesTitle");
 
-    // ✅ Update "Boliger (n)"
     function updateHousesTitle() {
       const count = document.querySelectorAll(".house-row").length;
       housesTitleEl.textContent = `Boliger (${count})`;
@@ -779,6 +791,7 @@
         thumbImg.style.display = "none";
       }
 
+      // Menu thumbnail click -> listingUrl (if present)
       thumbA.href = listingUrl || "#";
       thumbA.classList.toggle("show", !!imgUrl);
 
@@ -847,9 +860,9 @@
         houseMarkersById.delete(id);
       }
       rowEl.remove();
-      updateHousesTitle(); // ✅
       saveStateDebounced();
       setStatus("Bolig fjernet.");
+      updateHousesTitle();
     }
 
     function addHouseRow(address = "", listingUrl = "", imageUrl = "", price = "", desiredId = null) {
@@ -889,13 +902,14 @@
         </a>
 
         <div class="house-times" data-house-times="${id}">
-          <span class="tag na">Køretid: A: —</span>
+          <span class="label">Køretid:</span>
+          <span class="tag na">A: —</span>
           <span class="tag na">B: —</span>
         </div>
       `;
 
       housesContainer.appendChild(row);
-      updateHousesTitle(); // ✅
+      updateHousesTitle();
 
       const addrInput = row.querySelector(`#house_${id}`);
       const boxEl = row.querySelector(`#auto_${id}`);
@@ -985,7 +999,7 @@
         hs.forEach(h => addHouseRow(h.address || "", h.listingUrl || "", h.imageUrl || "", h.price || "", h.id || null));
       }
 
-      updateHousesTitle(); // ✅
+      updateHousesTitle();
     }
 
     // --------------------------
@@ -1043,6 +1057,7 @@
         L.geoJSON(b, { style: styleFromProps, pane: 'isoPane' }).addTo(geoLayer);
       }
 
+      // overlap highlight
       try {
         if (zoneA && zoneB) {
           const inter = turf.intersect(zoneA, zoneB);
@@ -1190,9 +1205,13 @@
           houseMarkersById.set(id, circle);
         }
 
+        // ✅ Køretid: label udenfor boblerne (kun før A/B boblerne)
         const timesEl = document.querySelector(`[data-house-times="${id}"]`);
         if (timesEl) {
-          timesEl.innerHTML = timeTag("A", aMin, minutesLimit) + timeTag("B", bMin, minutesLimit);
+          timesEl.innerHTML =
+            `<span class="label">Køretid:</span>` +
+            timeTag("A", aMin, minutesLimit) +
+            timeTag("B", bMin, minutesLimit);
         }
       });
 
@@ -1226,9 +1245,11 @@
       } catch (e) {
         setStatus(e.message || "Kunne ikke genskabe kort ved indlæsning.", true);
       }
+
+      updateHousesTitle();
     })();
 
-    // Ensure title correct on initial render even before restore completes
+    // Startværdi
     updateHousesTitle();
   </script>
 </body>
