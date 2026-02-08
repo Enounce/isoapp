@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Boligområde overlap</title>
 
+  <!-- Favicon: J & K (SVG data-URI) -->
+  <!-- NOTE: Browsere kan cache favicon hårdt. Hvis du lige har ændret det, så prøv Ctrl+F5 / Incognito. -->
+  <link rel="icon" type="image/svg+xml"
+    href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2064%2064%27%3E%3Crect%20width%3D%2764%27%20height%3D%2764%27%20rx%3D%2714%27%20fill%3D%27%23111%27/%3E%3Ctext%20x%3D%2732%27%20y%3D%2741%27%20text-anchor%3D%27middle%27%20font-size%3D%2728%27%20font-weight%3D%27700%27%20font-family%3D%27Arial%2CHelvetica%2Csans-serif%27%20fill%3D%27%23fff%27%3EJ%20%26%20K%3C/text%3E%3C/svg%3E" />
+  <!-- Fallback til ældre browsers -->
+  <link rel="alternate icon"
+    href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2064%2064%27%3E%3Crect%20width%3D%2764%27%20height%3D%2764%27%20rx%3D%2714%27%20fill%3D%27%23111%27/%3E%3Ctext%20x%3D%2732%27%20y%3D%2741%27%20text-anchor%3D%27middle%27%20font-size%3D%2728%27%20font-weight%3D%27700%27%20font-family%3D%27Arial%2CHelvetica%2Csans-serif%27%20fill%3D%27%23fff%27%3EJ%20%26%20K%3C/text%3E%3C/svg%3E" />
+
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <style>
@@ -170,8 +178,6 @@
       box-shadow: 0 6px 18px rgba(0,0,0,0.25);
       border: 2px solid rgba(255,255,255,0.95);
     }
-    .ab-a { background: #2563eb; }
-    .ab-b { background: #0a7a2f; }
 
     .leaflet-popup-content { margin: 10px 12px; }
   </style>
@@ -653,9 +659,33 @@
       return t.length > 70 ? (t.slice(0, 67) + "…") : t;
     }
 
-    // Google Maps search URL for an address string
-    function googleMapsSearchUrl(address) {
-      const q = (address || "").trim();
+    // --- Address cleanup for Google Maps link ---
+    // You identified ", SL, Denmark" as the trouble-maker.
+    // We remove that (and a few safe variants) from the URL query, while keeping the full address as link text.
+    function cleanForMapsQuery(address) {
+      let s = (address || "").trim();
+      if (!s) return s;
+
+      // normalize spacing around commas
+      s = s.replace(/\s*,\s*/g, ", ");
+
+      const patterns = [
+        /,?\s*SL\s*,\s*Denmark\s*$/i,
+        /,?\s*SL\s*,\s*Danmark\s*$/i,
+        /,?\s*Region\s*Sjælland\s*,\s*Denmark\s*$/i,
+        /,?\s*Region\s*Sjælland\s*,\s*Danmark\s*$/i
+      ];
+      for (const p of patterns) s = s.replace(p, "");
+
+      // also remove trailing ", Denmark"/", Danmark" if present (often helps)
+      s = s.replace(/,?\s*Denmark\s*$/i, "");
+      s = s.replace(/,?\s*Danmark\s*$/i, "");
+
+      return s.trim();
+    }
+
+    function googleMapsSearchUrlFromAddressText(addressText) {
+      const q = cleanForMapsQuery(addressText);
       return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
     }
 
@@ -715,7 +745,7 @@
       const price = normalizePrice(priceInput?.value);
 
       rowEl.dataset.imageUrl = imgUrl;
-      rowEl.dataset.listingUrl = listingUrl; // still kept for your own use in UI/menu
+      rowEl.dataset.listingUrl = listingUrl;
       rowEl.dataset.price = price;
 
       if (imgUrl) {
@@ -726,7 +756,7 @@
         thumbImg.style.display = "none";
       }
 
-      // In the menu thumbnail, clicking goes to listingUrl (if present)
+      // Menu thumbnail click -> listingUrl (if present)
       thumbA.href = listingUrl || "#";
       thumbA.classList.toggle("show", !!imgUrl);
 
@@ -987,6 +1017,7 @@
         L.geoJSON(b, { style: styleFromProps, pane: 'isoPane' }).addTo(geoLayer);
       }
 
+      // overlap highlight
       try {
         if (zoneA && zoneB) {
           const inter = turf.intersect(zoneA, zoneB);
@@ -1081,15 +1112,15 @@
 
         const safeAddr = (h.address_found || h.address_input || "").trim();
 
-        // 1) Address link => Google Maps search (NOT listingUrl)
-        const gmaps = googleMapsSearchUrl(safeAddr);
+        // Address link: Google Maps search, BUT with cleaned query (no ", SL, Denmark" etc.)
+        const gmaps = googleMapsSearchUrlFromAddressText(safeAddr);
         const addressHtml = `<span class="popup-address"><a href="${gmaps}" target="_blank" rel="noopener noreferrer">${safeAddr}</a></span>`;
 
         const priceHtml = price
           ? `<div style="margin-top:6px; font-weight:800;">${price}</div>`
           : "";
 
-        // Keep image clickable to listingUrl if present (same as before)
+        // Image clickable to listingUrl (if present)
         const imgHtml = (imgUrl && listingUrl)
           ? `<div style="margin-top:8px;">
                <a href="${listingUrl}" target="_blank" rel="noopener noreferrer">
