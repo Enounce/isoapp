@@ -170,8 +170,8 @@
       box-shadow: 0 6px 18px rgba(0,0,0,0.25);
       border: 2px solid rgba(255,255,255,0.95);
     }
-    .ab-a { background: #2563eb; } /* blue */
-    .ab-b { background: #0a7a2f; } /* fallback; will be overridden in JS */
+    .ab-a { background: #2563eb; }
+    .ab-b { background: #0a7a2f; }
 
     .leaflet-popup-content { margin: 10px 12px; }
   </style>
@@ -336,13 +336,13 @@
     // --------------------------
     const map = L.map('map').setView([55.6761, 12.5683], 10);
 
-    // --- PANES: ensure houses pins are always above isochrones/overlap ---
+    // PANES: ensure houses pins are always above isochrones/overlap
     // Default panes: tilePane(200), overlayPane(400), shadowPane(500), markerPane(600), tooltipPane(650), popupPane(700)
     map.createPane('isoPane');
-    map.getPane('isoPane').style.zIndex = 350; // under overlay/markers
+    map.getPane('isoPane').style.zIndex = 350;
 
     map.createPane('housesPane');
-    map.getPane('housesPane').style.zIndex = 650; // above markerPane
+    map.getPane('housesPane').style.zIndex = 650;
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -353,7 +353,6 @@
     let markerA = null;
     let markerB = null;
 
-    // Houses layer should be on housesPane so it stays on top
     const housesLayer = L.layerGroup({ pane: 'housesPane' }).addTo(map);
     const houseMarkersById = new Map();
 
@@ -654,6 +653,12 @@
       return t.length > 70 ? (t.slice(0, 67) + "…") : t;
     }
 
+    // Google Maps search URL for an address string
+    function googleMapsSearchUrl(address) {
+      const q = (address || "").trim();
+      return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+    }
+
     // --------------------------
     // Houses UI (unikke IDs + redigeringsknap + pris)
     // --------------------------
@@ -710,7 +715,7 @@
       const price = normalizePrice(priceInput?.value);
 
       rowEl.dataset.imageUrl = imgUrl;
-      rowEl.dataset.listingUrl = listingUrl;
+      rowEl.dataset.listingUrl = listingUrl; // still kept for your own use in UI/menu
       rowEl.dataset.price = price;
 
       if (imgUrl) {
@@ -721,6 +726,7 @@
         thumbImg.style.display = "none";
       }
 
+      // In the menu thumbnail, clicking goes to listingUrl (if present)
       thumbA.href = listingUrl || "#";
       thumbA.classList.toggle("show", !!imgUrl);
 
@@ -960,7 +966,6 @@
       const zoneAColor = fc?.features?.[0]?.properties?.color || "#2563eb";
       const zoneBColor = fc?.features?.[1]?.properties?.color || "#0a7a2f";
 
-      // --- geoLayer on isoPane so it stays underneath houses pins ---
       geoLayer = L.layerGroup({ pane: 'isoPane' }).addTo(map);
 
       const zoneA = fc.features?.[0] || null;
@@ -982,7 +987,6 @@
         L.geoJSON(b, { style: styleFromProps, pane: 'isoPane' }).addTo(geoLayer);
       }
 
-      // Overlap highlight (still on isoPane, but pins are on housesPane above it)
       try {
         if (zoneA && zoneB) {
           const inter = turf.intersect(zoneA, zoneB);
@@ -1077,14 +1081,15 @@
 
         const safeAddr = (h.address_found || h.address_input || "").trim();
 
-        const addressHtml = listingUrl
-          ? `<span class="popup-address"><a href="${listingUrl}" target="_blank" rel="noopener noreferrer">${safeAddr}</a></span>`
-          : `<span class="popup-address">${safeAddr}</span>`;
+        // 1) Address link => Google Maps search (NOT listingUrl)
+        const gmaps = googleMapsSearchUrl(safeAddr);
+        const addressHtml = `<span class="popup-address"><a href="${gmaps}" target="_blank" rel="noopener noreferrer">${safeAddr}</a></span>`;
 
         const priceHtml = price
           ? `<div style="margin-top:6px; font-weight:800;">${price}</div>`
           : "";
 
+        // Keep image clickable to listingUrl if present (same as before)
         const imgHtml = (imgUrl && listingUrl)
           ? `<div style="margin-top:8px;">
                <a href="${listingUrl}" target="_blank" rel="noopener noreferrer">
@@ -1103,8 +1108,8 @@
           ${priceHtml}
           <hr/>
           <b>Status:</b> ${inOverlap ? "Indenfor overlap" : "Udenfor overlap"}<br/>
-          <b>${data.profile_name} fra A:</b> ${aMin == null ? "—" : aMin + " min"}<br/>
-          <b>${data.profile_name} fra B:</b> ${bMin == null ? "—" : bMin + " min"}<br/>
+          <b>Køretid fra A:</b> ${aMin == null ? "—" : aMin + " min"}<br/>
+          <b>Køretid fra B:</b> ${bMin == null ? "—" : bMin + " min"}<br/>
           ${imgHtml}
         `;
 
@@ -1115,8 +1120,6 @@
           existingMarker.bindPopup(popup);
           existingMarker.off("click");
           existingMarker.on("click", () => existingMarker.openPopup());
-
-          // Ensure it stays on top of isochrones
           existingMarker.bringToFront();
         } else {
           const circle = L.circleMarker([lat, lon], {
@@ -1161,7 +1164,6 @@
       await restoreFromServer();
       isRestoring = false;
 
-      // Ensure server has at least current state
       saveServerState(getCurrentState()).catch(() => {});
 
       try {
