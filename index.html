@@ -207,12 +207,64 @@
     }
 
     .leaflet-popup-content { margin: 10px 12px; }
+
+    /* --------------------------
+       ✅ Responsive layout
+       -------------------------- */
+    @media (max-width: 900px) {
+      .wrap {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+        height: 100dvh;
+      }
+      .panel {
+        border-right: none;
+        border-bottom: 1px solid #ddd;
+        max-height: 48dvh;
+        overflow-y: auto;
+      }
+      #map { height: 52dvh; }
+    }
+
+    @media (max-width: 480px) {
+      .panel { max-height: 55dvh; }
+      #map { height: 45dvh; }
+      .row { flex-wrap: wrap; }
+      .row button { flex: 1 1 160px; }
+    }
+
+    /* --------------------------
+       ✅ Mobile toggle (show/hide panel)
+       -------------------------- */
+    .mobile-toggle {
+      display: none;
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      bottom: 12px;
+      z-index: 10000;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(0,0,0,0.12);
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(6px);
+      font-weight: 800;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+    }
+    @media (max-width: 900px) {
+      .mobile-toggle { display: block; }
+      body.panel-collapsed .panel { display: none; }
+      body.panel-collapsed .wrap {
+        grid-template-rows: 1fr;
+      }
+      body.panel-collapsed #map { height: 100dvh; }
+    }
   </style>
 </head>
 
 <body>
   <div class="wrap">
-    <div class="panel">
+    <div class="panel" id="panel">
       <!-- ✅ Titel i UI -->
       <h2 style="margin:0 0 4px 0;">🎯 Bolig Sweet Spot</h2>
       <div class="muted" style="margin-top:0;">find boliger i fælles rækkevidde</div>
@@ -275,10 +327,48 @@
     <div id="map"></div>
   </div>
 
+  <!-- ✅ Mobile: toggle panel -->
+  <button class="mobile-toggle" id="togglePanelBtn" type="button">Skjul menu</button>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
 
   <script>
+    // --------------------------
+    // Mobile toggle
+    // --------------------------
+    const toggleBtn = document.getElementById("togglePanelBtn");
+
+    function isMobileLayout() {
+      return window.matchMedia("(max-width: 900px)").matches;
+    }
+
+    function updateToggleText() {
+      const collapsed = document.body.classList.contains("panel-collapsed");
+      toggleBtn.textContent = collapsed ? "Vis menu" : "Skjul menu";
+    }
+
+    function applyToggleVisibility() {
+      // show toggle only on mobile (CSS already does, but keep text consistent)
+      if (!isMobileLayout()) {
+        document.body.classList.remove("panel-collapsed");
+      }
+      updateToggleText();
+    }
+
+    toggleBtn.addEventListener("click", () => {
+      document.body.classList.toggle("panel-collapsed");
+      updateToggleText();
+      // Leaflet needs invalidateSize when container changes size
+      setTimeout(() => map.invalidateSize(true), 250);
+    });
+
+    window.addEventListener("resize", () => {
+      applyToggleVisibility();
+      // keep map correct on rotations/resizes
+      setTimeout(() => map.invalidateSize(true), 150);
+    });
+
     // --------------------------
     // Server-side persistence
     // --------------------------
@@ -791,7 +881,6 @@
         thumbImg.style.display = "none";
       }
 
-      // Menu thumbnail click -> listingUrl (if present)
       thumbA.href = listingUrl || "#";
       thumbA.classList.toggle("show", !!imgUrl);
 
@@ -1205,7 +1294,7 @@
           houseMarkersById.set(id, circle);
         }
 
-        // ✅ Køretid: label udenfor boblerne (kun før A/B boblerne)
+        // ✅ Køretid-label udenfor boblerne (kun før boblerne)
         const timesEl = document.querySelector(`[data-house-times="${id}"]`);
         if (timesEl) {
           timesEl.innerHTML =
@@ -1233,6 +1322,8 @@
     // Init: restore + auto draw
     // --------------------------
     (async function init() {
+      applyToggleVisibility();
+
       isRestoring = true;
       await restoreFromServer();
       isRestoring = false;
@@ -1247,6 +1338,10 @@
       }
 
       updateHousesTitle();
+      updateToggleText();
+
+      // ensure correct Leaflet sizing after initial layout
+      setTimeout(() => map.invalidateSize(true), 250);
     })();
 
     // Startværdi
